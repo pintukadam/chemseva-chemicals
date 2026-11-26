@@ -1,21 +1,40 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useId } from 'react';
 import { Send, CheckCircle2, AlertCircle, Loader2 } from 'lucide-react';
-import { validateEnquiryForm, submitEnquiry } from '../utils/enquiry';
-import { categories } from '../data/products';
-import { getWhatsAppLink } from '../utils/whatsapp';
+import {
+  validateEnquiryForm,
+  submitEnquiry,
+  buildEnquiryWhatsAppUrl
+} from '../utils/enquiry';
+
+const getInitialFormState = (prefilledProduct = '') => ({
+  name: '',
+  company: '',
+  mobile: '',
+  email: '',
+  product: prefilledProduct || '',
+  message: prefilledProduct
+    ? `I am interested in receiving a quote and technical datasheet for ${prefilledProduct}.`
+    : '',
+  botcheck: ''
+});
 
 export default function EnquiryForm({ prefilledProduct = '' }) {
-  const [formData, setFormData] = useState({
-    name: '',
-    company: '',
-    mobile: '',
-    email: '',
-    product: prefilledProduct || '',
-    message: prefilledProduct ? `I am interested in receiving a quote and technical datasheet for ${prefilledProduct}.` : ''
-  });
-
+  const formId = useId();
+  const [formData, setFormData] = useState(() => getInitialFormState(prefilledProduct));
   const [errors, setErrors] = useState({});
-  const [status, setStatus] = useState({ state: 'idle', message: '' }); // idle, submitting, success, error
+  const [status, setStatus] = useState({ state: 'idle', message: '', whatsappUrl: '' });
+
+  useEffect(() => {
+    if (prefilledProduct) {
+      setFormData((prev) => ({
+        ...prev,
+        product: prefilledProduct,
+        message:
+          prev.message ||
+          `I am interested in receiving a quote and technical datasheet for ${prefilledProduct}.`
+      }));
+    }
+  }, [prefilledProduct]);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -34,23 +53,20 @@ export default function EnquiryForm({ prefilledProduct = '' }) {
       return;
     }
 
-    setStatus({ state: 'submitting', message: '' });
+    setStatus({ state: 'submitting', message: '', whatsappUrl: '' });
 
     const result = await submitEnquiry(formData);
 
     if (result.success) {
-      setStatus({ state: 'success', message: result.message });
-      setFormData({
-        name: '',
-        company: '',
-        mobile: '',
-        email: '',
-        product: '',
-        message: ''
-      });
+      setStatus({ state: 'success', message: result.message, whatsappUrl: '' });
+      setFormData(getInitialFormState(''));
       setErrors({});
     } else {
-      setStatus({ state: 'error', message: result.message });
+      setStatus({
+        state: 'error',
+        message: result.message,
+        whatsappUrl: result.whatsappUrl || buildEnquiryWhatsAppUrl(formData)
+      });
     }
   };
 
@@ -64,8 +80,12 @@ export default function EnquiryForm({ prefilledProduct = '' }) {
       </p>
 
       {status.state === 'success' && (
-        <div className="mb-6 p-4 rounded-2xl bg-teal/10 border border-teal/30 text-teal flex items-start gap-3">
-          <CheckCircle2 className="w-5 h-5 shrink-0 mt-0.5" />
+        <div
+          role="status"
+          aria-live="polite"
+          className="mb-6 p-4 rounded-2xl bg-teal/10 border border-teal/30 text-teal flex items-start gap-3"
+        >
+          <CheckCircle2 className="w-5 h-5 shrink-0 mt-0.5" aria-hidden="true" />
           <div className="text-xs font-semibold">
             <p className="font-bold text-sm">Enquiry Sent Successfully!</p>
             <p className="mt-1 text-gray-600 font-normal">{status.message}</p>
@@ -74,108 +94,163 @@ export default function EnquiryForm({ prefilledProduct = '' }) {
       )}
 
       {status.state === 'error' && (
-        <div className="mb-6 p-4 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 flex flex-col gap-2">
+        <div
+          role="alert"
+          className="mb-6 p-4 rounded-2xl bg-amber-50 border border-amber-200 text-amber-900 flex flex-col gap-2"
+        >
           <div className="flex items-start gap-3">
-            <AlertCircle className="w-5 h-5 shrink-0 mt-0.5 text-amber-600" />
+            <AlertCircle className="w-5 h-5 shrink-0 mt-0.5 text-amber-600" aria-hidden="true" />
             <div className="text-xs">
-              <p className="font-bold text-sm text-amber-800">Notice</p>
+              <p className="font-bold text-sm text-amber-800">Could Not Send Online</p>
               <p className="mt-1 text-amber-700">{status.message}</p>
             </div>
           </div>
           <div className="pl-8 pt-1">
             <a
-              href={getWhatsAppLink(`Hi ChemSeva, I am enquiring about ${formData.product || 'chemical products'}. My name is ${formData.name || ''} from ${formData.company || ''}.`)}
+              href={status.whatsappUrl || buildEnquiryWhatsAppUrl(formData)}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-teal text-white text-xs font-semibold hover:bg-teal-dark transition-colors"
             >
-              Continue on WhatsApp &rarr;
+              Send via WhatsApp &rarr;
             </a>
           </div>
         </div>
       )}
 
-      <form onSubmit={handleSubmit} className="space-y-4">
+      <form onSubmit={handleSubmit} noValidate className="space-y-4">
+        {/* Honeypot field for spam bots (zero-cost bot protection) */}
+        <div className="hidden" aria-hidden="true">
+          <label htmlFor={`${formId}-botcheck`}>Leave this field empty</label>
+          <input
+            id={`${formId}-botcheck`}
+            type="text"
+            name="botcheck"
+            value={formData.botcheck}
+            onChange={handleChange}
+            tabIndex={-1}
+            autoComplete="off"
+          />
+        </div>
+
         {/* Name and Company */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
-            <label className="block text-xs font-bold text-gray-700 mb-1">
+            <label htmlFor={`${formId}-name`} className="block text-xs font-bold text-gray-700 mb-1">
               Your Name <span className="text-red-500">*</span>
             </label>
             <input
+              id={`${formId}-name`}
               type="text"
               name="name"
+              required
+              autoComplete="name"
               value={formData.name}
               onChange={handleChange}
               placeholder="e.g. Ramesh Patel"
+              aria-invalid={Boolean(errors.name)}
+              aria-describedby={errors.name ? `${formId}-name-error` : undefined}
               className={`w-full px-3.5 py-2.5 rounded-xl border text-xs focus:outline-none transition-colors ${
                 errors.name ? 'border-red-400 focus:border-red-500 bg-red-50/20' : 'border-gray-200 focus:border-primary'
               }`}
             />
-            {errors.name && <p className="text-[11px] text-red-500 mt-1">{errors.name}</p>}
+            {errors.name && (
+              <p id={`${formId}-name-error`} className="text-[11px] text-red-500 mt-1">
+                {errors.name}
+              </p>
+            )}
           </div>
 
           <div>
-            <label className="block text-xs font-bold text-gray-700 mb-1">
+            <label htmlFor={`${formId}-company`} className="block text-xs font-bold text-gray-700 mb-1">
               Company Name <span className="text-red-500">*</span>
             </label>
             <input
+              id={`${formId}-company`}
               type="text"
               name="company"
+              required
+              autoComplete="organization"
               value={formData.company}
               onChange={handleChange}
               placeholder="e.g. Acme Textiles Ltd."
+              aria-invalid={Boolean(errors.company)}
+              aria-describedby={errors.company ? `${formId}-company-error` : undefined}
               className={`w-full px-3.5 py-2.5 rounded-xl border text-xs focus:outline-none transition-colors ${
                 errors.company ? 'border-red-400 focus:border-red-500 bg-red-50/20' : 'border-gray-200 focus:border-primary'
               }`}
             />
-            {errors.company && <p className="text-[11px] text-red-500 mt-1">{errors.company}</p>}
+            {errors.company && (
+              <p id={`${formId}-company-error`} className="text-[11px] text-red-500 mt-1">
+                {errors.company}
+              </p>
+            )}
           </div>
         </div>
 
         {/* Mobile and Email */}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
-            <label className="block text-xs font-bold text-gray-700 mb-1">
+            <label htmlFor={`${formId}-mobile`} className="block text-xs font-bold text-gray-700 mb-1">
               Mobile Number <span className="text-red-500">*</span>
             </label>
             <input
+              id={`${formId}-mobile`}
               type="tel"
               name="mobile"
+              required
+              autoComplete="tel"
+              inputMode="tel"
               value={formData.mobile}
               onChange={handleChange}
               placeholder="e.g. 9876543210"
+              aria-invalid={Boolean(errors.mobile)}
+              aria-describedby={errors.mobile ? `${formId}-mobile-error` : undefined}
               className={`w-full px-3.5 py-2.5 rounded-xl border text-xs focus:outline-none transition-colors ${
                 errors.mobile ? 'border-red-400 focus:border-red-500 bg-red-50/20' : 'border-gray-200 focus:border-primary'
               }`}
             />
-            {errors.mobile && <p className="text-[11px] text-red-500 mt-1">{errors.mobile}</p>}
+            {errors.mobile && (
+              <p id={`${formId}-mobile-error`} className="text-[11px] text-red-500 mt-1">
+                {errors.mobile}
+              </p>
+            )}
           </div>
 
           <div>
-            <label className="block text-xs font-bold text-gray-700 mb-1">
+            <label htmlFor={`${formId}-email`} className="block text-xs font-bold text-gray-700 mb-1">
               Email Address <span className="text-red-500">*</span>
             </label>
             <input
+              id={`${formId}-email`}
               type="email"
               name="email"
+              required
+              autoComplete="email"
               value={formData.email}
               onChange={handleChange}
               placeholder="e.g. purchase@company.com"
+              aria-invalid={Boolean(errors.email)}
+              aria-describedby={errors.email ? `${formId}-email-error` : undefined}
               className={`w-full px-3.5 py-2.5 rounded-xl border text-xs focus:outline-none transition-colors ${
                 errors.email ? 'border-red-400 focus:border-red-500 bg-red-50/20' : 'border-gray-200 focus:border-primary'
               }`}
             />
-            {errors.email && <p className="text-[11px] text-red-500 mt-1">{errors.email}</p>}
+            {errors.email && (
+              <p id={`${formId}-email-error`} className="text-[11px] text-red-500 mt-1">
+                {errors.email}
+              </p>
+            )}
           </div>
         </div>
 
         {/* Product Interested In */}
         <div>
-          <label className="block text-xs font-bold text-gray-700 mb-1">
+          <label htmlFor={`${formId}-product`} className="block text-xs font-bold text-gray-700 mb-1">
             Product Interested In
           </label>
           <input
+            id={`${formId}-product`}
             type="text"
             name="product"
             value={formData.product}
@@ -187,20 +262,28 @@ export default function EnquiryForm({ prefilledProduct = '' }) {
 
         {/* Message */}
         <div>
-          <label className="block text-xs font-bold text-gray-700 mb-1">
+          <label htmlFor={`${formId}-message`} className="block text-xs font-bold text-gray-700 mb-1">
             Requirement Details / Message <span className="text-red-500">*</span>
           </label>
           <textarea
+            id={`${formId}-message`}
             name="message"
             rows="4"
+            required
             value={formData.message}
             onChange={handleChange}
             placeholder="Please specify application, required volume, delivery location, or test sample requests..."
+            aria-invalid={Boolean(errors.message)}
+            aria-describedby={errors.message ? `${formId}-message-error` : undefined}
             className={`w-full px-3.5 py-2.5 rounded-xl border text-xs focus:outline-none transition-colors ${
               errors.message ? 'border-red-400 focus:border-red-500 bg-red-50/20' : 'border-gray-200 focus:border-primary'
             }`}
           />
-          {errors.message && <p className="text-[11px] text-red-500 mt-1">{errors.message}</p>}
+          {errors.message && (
+            <p id={`${formId}-message-error`} className="text-[11px] text-red-500 mt-1">
+              {errors.message}
+            </p>
+          )}
         </div>
 
         {/* Submit Button */}
@@ -211,12 +294,12 @@ export default function EnquiryForm({ prefilledProduct = '' }) {
         >
           {status.state === 'submitting' ? (
             <>
-              <Loader2 className="w-4 h-4 animate-spin" />
+              <Loader2 className="w-4 h-4 animate-spin" aria-hidden="true" />
               <span>Transmitting Enquiry...</span>
             </>
           ) : (
             <>
-              <Send className="w-4 h-4" />
+              <Send className="w-4 h-4" aria-hidden="true" />
               <span>Submit Commercial Enquiry</span>
             </>
           )}

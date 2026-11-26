@@ -1,4 +1,4 @@
-import { companyInfo } from '../data/company';
+import { companyInfo } from '../data/company.js';
 
 export const generateWhatsAppLink = (message = '') => {
   const phone = companyInfo.whatsapp.replace(/[^0-9]/g, '');
